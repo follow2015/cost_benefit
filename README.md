@@ -67,14 +67,17 @@ docker compose -f docker-compose.dist.yml exec backend python -m scripts.seed
 打开 http://localhost:5173 。锁定版本用 `AIROI_TAG`（不设则跟随 `main`）：
 
 ```bash
-AIROI_TAG=v0.1.1 docker compose -f docker-compose.dist.yml up -d
+AIROI_TAG=0.1.1 docker compose -f docker-compose.dist.yml up -d
 ```
+
+> 注意 tag 形式：发版 tag 是 `v0.1.1`，**镜像 tag 去掉 `v`，写成 `0.1.1`**。
+> 每个版本同时打 `latest`。
 
 只想拿镜像、自己写编排：
 
 ```bash
-docker pull ghcr.io/follow2015/cost_benefit-backend:v0.1.1
-docker pull ghcr.io/follow2015/cost_benefit-frontend:v0.1.1
+docker pull ghcr.io/follow2015/cost_benefit-backend:0.1.1
+docker pull ghcr.io/follow2015/cost_benefit-frontend:0.1.1
 ```
 
 ### 方式二：Docker Compose 本地构建
