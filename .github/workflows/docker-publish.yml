@@ -1,0 +1,103 @@
+name: Docker Publish
+
+# 预构建镜像：GitHub Actions 自动构建后端 / 前端两个镜像并推到 GHCR，
+# 使用者无需本地 build（Dockerfile 里要拉 Node / Python 依赖，冷启动是十几分钟量级）。
+#
+# 不新增任何账号或 secret：GHCR 用仓库自带的 GITHUB_TOKEN 推送，
+# 只把它从默认的只读临时提权到 packages: write（见下方 permissions）。
+#
+# 触发面三条：
+#   tags: v*           ← 发版：git tag v0.1.1 && git push origin v0.1.1
+#   branches: main     ← 每推 main 出 :main（README 里“直接拉取”用的就是它）
+#   workflow_dispatch  ← 手动补跑（镜像构建失败的兜底入口）
+# ⚠️ 刻意**不加** `on: release`：打 tag 与创建 Release 会各触发一次，
+#   两次都推同一个版本号 ⇒ 白烧一倍 CI。
+on:
+  push:
+    tags: ["v*"]
+    branches: [main]
+    # 只改文档 / CI 配置 / 许可证不应产出新的镜像版本：
+    # 每次构建都会在 GHCR 新增一条 version 条目，旧条目变 dangling。
+    # 需要强制重建镜像时走 workflow_dispatch。
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+      - ".github/**"
+      - "LICENSE"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  packages: write # 推 GHCR 必需；GITHUB_TOKEN 默认**没有**这个权限，必须显式声明
+
+# 同一 ref 连推时取消上一轮：镜像构建是几分钟量级，排队没意义。
+concurrency:
+  group: docker-publish-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-push:
+    name: 构建并推送 ${{ matrix.image }}（amd64 + arm64）
+    runs-on: ubuntu-latest
+    strategy:
+      # 一侧失败不打断另一侧：前端构建失败不该连带取消后端推送（反之亦然）。
+      fail-fast: false
+      matrix:
+        include:
+          - image: backend
+            context: ./backend
+            dockerfile: ./backend/Dockerfile
+            title: cost_benefit-backend
+            description: AI 算力投资 ROI 测算平台 · 后端（FastAPI + asyncpg + Alembic）
+          - image: frontend
+            context: ./frontend
+            dockerfile: ./frontend/Dockerfile
+            title: cost_benefit-frontend
+            description: AI 算力投资 ROI 测算平台 · 前端（Vite 产物 + nginx）
+    steps:
+      - uses: actions/checkout@v4
+
+      # 多架构：使用者若是 Apple Silicon（darwin/arm64）或 arm 服务器，
+      # 只出 amd64 会全程走 Rosetta/qemu 模拟。qemu 是为在 amd64 runner 上构建 arm64 层。
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: 登录 GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 提取镜像 tag
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          # github.repository = follow2015/cost_benefit；GHCR 会自动转小写。
+          # 两个镜像共用一套 tag 策略 ⇒ 一把 AIROI_TAG 同时锁定前后端版本。
+          images: ghcr.io/${{ github.repository }}-${{ matrix.image }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            # 刻意不用 type=sha：sha tag 无消费场景，且每次构建都新增一条
+            # version 条目，清完 dangling 又会积累。semver 版本默认附带 latest。
+          # 显式声明 OCI labels：source 决定 GHCR 上 package 与仓库的**关联关系**
+          #（缺它则 package 页显示不出仓库），其余决定页面信息是否完整。
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.title=${{ matrix.title }}
+            org.opencontainers.image.description=${{ matrix.description }}
+            org.opencontainers.image.licenses=Apache-2.0
+
+      - name: 构建并推送
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # scope 按镜像分开：两个镜像的层完全不同，共用 scope 会互相挤占缓存。
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}

@@ -1,0 +1,42 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# 构建上下文收窄（backend/Dockerfile 的 context 就是本目录）
+#
+# 为什么必须有这个文件：Dockerfile 末尾是 `COPY . .`，没有本文件时
+# 本地的 .venv / 缓存 / .env 会被一并拷进镜像 ——
+#   • .venv 是 macOS 的二进制，进 Linux 镜像只有体积代价（几百 MB）且
+#     与镜像内 pip 装的包冲突，`ai_roi` 可能解析到错误的解释器路径；
+#   • .env 里是本地真实口令，打进镜像等于把密钥随制品分发。
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ── 版本控制与本地状态 ──
+.git
+.gitignore
+.dockerignore
+
+# ── Python 虚拟环境与缓存 ──
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# ── 运行期目录：由容器自己建，绝不能从宿主机拷进去 ──
+instance/
+logs/
+*.log
+
+# ── 敏感文件：绝不进镜像 ──
+.env
+.env.*
+!.env.example
+
+# ── 编辑器 ──
+.vscode/
+.idea/
+.DS_Store

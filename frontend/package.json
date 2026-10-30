@@ -1,7 +1,7 @@
 {
   "name": "ai-roi-calculator-frontend",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "AI 算力投资 ROI 测算平台前端（P0 MVP）。React 19 + TS + Vite + AntD + Zustand + TanStack Query + RR + Axios + ECharts。",
   "scripts": {

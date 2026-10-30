@@ -1,0 +1,37 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# 构建上下文收窄（frontend/Dockerfile 的 context 就是本目录）
+#
+# ⚠️ node_modules/ 必须排除，这不是体积优化而**是构建正确性问题**：
+# Dockerfile 先用 `npm install` 在镜像内装依赖，随后 `COPY . .`。
+# 若不排除，宿主（macOS / 不同 Node 版本）的 node_modules 会**覆盖**镜像内
+# 刚装好的那份，esbuild / rollup 的原生二进制平台不匹配 ⇒ `npm run build` 直接失败。
+# 本地能构建成功、CI 必挂在同一处，原因就在这里。
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ── 版本控制与本地状态 ──
+.git
+.gitignore
+.dockerignore
+
+# ── 依赖与构建产物（必须由镜像内重新生成）──
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.vite/
+
+# ── 端到端测试（浏览器驱动，不进运行镜像）──
+e2e/
+playwright-report/
+test-results/
+blob-report/
+
+# ── 环境变量：构建期由 Dockerfile 的 ARG 注入 ──
+.env
+.env.*
+!.env.example
+
+# ── 编辑器 ──
+.vscode/
+.idea/
+.DS_Store

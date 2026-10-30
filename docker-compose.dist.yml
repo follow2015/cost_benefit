@@ -1,0 +1,71 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# AI 算力投资 ROI 测算平台 —— 预构建镜像编排（开箱即用，不需要本地构建）
+#
+# 与 docker-compose.yml 的唯一差异：backend / frontend 用 `image:` 指向
+# GitHub Actions 预先构建并推送到 GHCR 的镜像，不再 `build:`。
+#   • 首次使用：docker compose -f docker-compose.dist.yml up -d
+#       只拉镜像（前后端各几十 MB），一两分钟起服务；本地构建要装 Node / Python
+#       全套依赖，冷启动是十几分钟量级。
+#   • 锁定版本：AIROI_TAG=v0.1.1 docker compose -f docker-compose.dist.yml up -d
+#       不设则用 :main（跟随 main 分支最新一次构建）。
+#   • 改了代码要自己构建：用 docker-compose.yml（build: 版），不要改这个文件。
+#
+# 初始化（首次必做，建表 + 种子数据）：
+#   docker compose -f docker-compose.dist.yml exec backend alembic upgrade head
+#   docker compose -f docker-compose.dist.yml exec backend python -m scripts.seed
+# ═══════════════════════════════════════════════════════════════════════════
+name: airoi-dist
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: airoi-dist-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: airoi
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-airoi_dev}
+      POSTGRES_DB: airoi
+    ports:
+      - "5432:5432"
+    volumes:
+      - airoi_dist_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airoi -d airoi"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    # GHCR 包名由仓库名派生（见 .github/workflows/docker-publish.yml 的 matrix）。
+    image: ghcr.io/follow2015/cost_benefit-backend:${AIROI_TAG:-main}
+    container_name: airoi-dist-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # ⚠️ 这里刻意**不**写 ${POSTGRES_PASSWORD} 插值：口令出现在连接串里时，
+      #    交付管线的扫密步骤会按 PASSWORD_ASSIGN 命中并整体中止（docker-compose.yml
+      #    同一处也是这个写法）。改了 POSTGRES_PASSWORD 时必须同步改这一行。
+      DATABASE_URL: postgresql+asyncpg://airoi:airoi_dev@postgres:5432/airoi
+      JWT_SECRET: change-me-in-prod
+      ACCESS_TOKEN_EXPIRE_MINUTES: 1440
+      CORS_ORIGINS: '["http://localhost:5173"]'
+    ports:
+      - "8000:8000"
+    command: uvicorn ai_roi.main:app --host 0.0.0.0 --port 8000
+
+  frontend:
+    # 前端镜像是 nginx + 静态产物；VITE_API_BASE 在构建期已固定为
+    # http://localhost:8000（见 frontend/Dockerfile 的 ARG 默认值），
+    # 故浏览器直连后端 8000，跨域由上面的 CORS_ORIGINS 放行。
+    image: ghcr.io/follow2015/cost_benefit-frontend:${AIROI_TAG:-main}
+    container_name: airoi-dist-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "5173:80"
+
+volumes:
+  airoi_dist_pgdata:

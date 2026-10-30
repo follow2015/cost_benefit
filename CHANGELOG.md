@@ -9,6 +9,31 @@
 
 （暂无）
 
+## [0.1.1] - 2026-10-30
+
+发布形态补齐：镜像交给 CI 构建，使用者不必再本地 build。
+
+### Added
+
+- **预构建镜像**：`v*` tag 与 `main` 推送时自动构建后端 / 前端镜像并推送至 GHCR，
+  `amd64` + `arm64` 双架构。新增 `docker-compose.dist.yml`，`up -d` 即拉即用；
+  `AIROI_TAG` 可锁定版本。
+- **`LICENSE`**：Apache License 2.0。
+
+### Changed
+
+- `backend/`、`frontend/` 增加 `.dockerignore`：构建上下文不再携带本地虚拟环境、
+  `node_modules` 与 `.env`。
+
+### Fixed
+
+- 前端镜像构建：宿主 `node_modules` 不再覆盖镜像内依赖（原生二进制平台不匹配
+  会让 `vite build` 失败 —— 本地能过、CI 必挂）。
+
+### Removed
+
+- `scripts/installer/`：ipip 项目的安装器误入本仓，与本项目无关，整目录删除。
+
 ## [0.1.0] - 2026-10-30
 
 首个公开版本：AI 算力投资 ROI 测算平台 P0 全量能力 + 六边形架构后端 + 双端

@@ -1,6 +1,6 @@
 [project]
 name = "ai-roi-calculator-backend"
-version = "0.1.0"
+version = "0.1.1"
 description = "AI 算力投资经济性测算平台 · FastAPI 后端（六边形架构：领域/应用/基础设施/接口）"
 requires-python = ">=3.14"
 authors = [{ name = "寇豆码 (Kou)", email = "kou@example.com" }]

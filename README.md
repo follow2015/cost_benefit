@@ -1,11 +1,11 @@
 # AI 算力投资 ROI 测算平台
 
-[![Version](https://img.shields.io/badge/version-v0.1.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v0.1.1-blue.svg)](CHANGELOG.md)
 
 给 AI 算力投资算一笔明白账：**自建 GPU 集群、租用算力、第三方 API** 三条路线放在同一把尺子上量，
 输出每百万 token 的真实成本、投资回收路径，以及「在什么规模下哪条路更便宜」的临界点。
 
-> 当前版本 v0.1.0 · 变更见 [CHANGELOG.md](CHANGELOG.md)
+> 当前版本 v0.1.1 · 变更见 [CHANGELOG.md](CHANGELOG.md)
 
 贯穿全链路的四条口径约定，也是与别人对账的前提：
 
@@ -47,7 +47,39 @@
 
 ## 快速开始
 
-### 方式一：Docker Compose（最快看到界面）
+### 方式一：直接拉预构建镜像（推荐）
+
+镜像由 GitHub Actions 在发版时自动构建，`linux/amd64` 与 `linux/arm64` 双架构
+（Apple Silicon 不必走模拟），托管在 GitHub Packages（GHCR），公开可拉、无需登录：
+
+| 镜像 | 地址 |
+|---|---|
+| 后端 | `ghcr.io/follow2015/cost_benefit-backend` |
+| 前端 | `ghcr.io/follow2015/cost_benefit-frontend` |
+
+```bash
+docker compose -f docker-compose.dist.yml pull
+docker compose -f docker-compose.dist.yml up -d
+docker compose -f docker-compose.dist.yml exec backend alembic upgrade head
+docker compose -f docker-compose.dist.yml exec backend python -m scripts.seed
+```
+
+打开 http://localhost:5173 。锁定版本用 `AIROI_TAG`（不设则跟随 `main`）：
+
+```bash
+AIROI_TAG=v0.1.1 docker compose -f docker-compose.dist.yml up -d
+```
+
+只想拿镜像、自己写编排：
+
+```bash
+docker pull ghcr.io/follow2015/cost_benefit-backend:v0.1.1
+docker pull ghcr.io/follow2015/cost_benefit-frontend:v0.1.1
+```
+
+### 方式二：Docker Compose 本地构建
+
+改了代码、要自己构建时用这条（源码在本地，不依赖预构建镜像）：
 
 ```bash
 docker compose up -d --build            # PG16 :5432 + 后端 :8000 + 前端 :5173
@@ -70,7 +102,7 @@ SEED_DEMO_PASSWORD='<你的强密码>' docker compose exec -e SEED_DEMO_PASSWORD
 > 端口偏移的 v2 栈（PG 5433 / Redis 6380 / 后端 8001 / 前端 5174，可与 v1 并存）：
 > `docker compose -f docker-compose.v2.yml up -d --build`。Redis 未启动时相关能力自动降级。
 
-### 方式二：本地运行
+### 方式三：本地运行
 
 环境要求：**Python 3.14**、**Node ^22.12 || ^24 || >=26**、PostgreSQL 16（Redis 可选）。
 
@@ -124,7 +156,6 @@ serving 包络的**成本侧**，不是对外售价；落库前按汇率折成 C
 
 ## 已知限制
 
-- **未声明开源许可证**：仓库暂无 `LICENSE`，默认保留所有权利。确定许可证后再声明可用范围。
 - **演示数据是示例值**：种子数据的量级用于跑通链路，不是真实报价；生产需接入权威基准源。
 - **敏感性与情景默认单因素**：±Δ 扰动为主；蒙特卡洛与联合网格已实现但默认关闭。
 - **多租户隔离依赖数据库行级安全策略**：超管通道仅运维使用，无界面入口。
@@ -132,4 +163,4 @@ serving 包络的**成本侧**，不是对外售价；落库前按汇率折成 C
 
 ## 许可
 
-本项目尚未声明开源许可证（仓库内无 `LICENSE` 文件）。在补充许可证之前，请按「保留所有权利」对待。
+[Apache License 2.0](LICENSE)。可自由使用、修改、分发（含商业用途），保留版权与许可声明即可。
