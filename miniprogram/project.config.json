@@ -1,0 +1,18 @@
+{
+  "description": "AI 算力 ROI 测算平台 - 微信小程序壳（web-view 承载现有 H5）",
+  "appid": "touristappid",
+  "compileType": "miniprogram",
+  "libVersion": "3.5.0",
+  "projectname": "ai-roi-calculator-mini",
+  "setting": {
+    "urlCheck": true,
+    "es6": true,
+    "enhance": true,
+    "postcss": true,
+    "minified": true,
+    "packNpmManually": false,
+    "packNpmRelationList": []
+  },
+  "condition": {},
+  "miniprogramRoot": "./"
+}

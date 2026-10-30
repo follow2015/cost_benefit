@@ -1,0 +1,28 @@
+# AI 算力投资经济性测算平台 · 后端依赖（redesign 分支）
+# 环境基线：Python 3.14.8（.venv314 / Docker python:3.14-slim）—— 不可降级
+# 以下版本均为本沙箱 Python 3.14 实测可安装且 184 项测试全绿的组合。
+fastapi==0.128.2
+uvicorn[standard]==0.40.0
+pydantic==2.12.5
+pydantic-settings==2.7.1
+email-validator==2.2.0          # pydantic EmailStr 依赖
+# SQLAlchemy >= 2.0.41：2.0.37 的 make_union_type 在 Python 3.14 触发
+# `Union.__getitem__(tuple)` TypeError；2.0.41 起官方支持 3.14，禁止降级回退。
+sqlalchemy[asyncio]==2.0.41
+greenlet==3.3.1                 # SQLAlchemy 异步驱动依赖
+# asyncpg >= 0.31.0：0.30.0 无 cp314 预编译 wheel（3.14 容器内无 gcc 将源码构建失败）。
+asyncpg==0.32.0
+alembic==1.14.1
+PyJWT==2.13.0
+python-multipart==0.0.21
+structlog==25.1.0
+orjson==3.11.7
+httpx==0.28.1
+redis==5.2.1                    # 异步 Redis 客户端（限流/缓存/令牌黑名单）
+pytest==8.4.2
+pytest-asyncio==0.25.2
+# P1 报告导出
+reportlab==4.4.9
+openpyxl==3.1.5
+# 架构契约（六边形分层 import-linter L1–L5，CI 强制）
+import-linter==2.15

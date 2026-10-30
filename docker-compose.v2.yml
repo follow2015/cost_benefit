@@ -1,0 +1,81 @@
+# AI 算力投资 ROI 测算平台 —— redesign（v2）本地一键编排。
+#
+# 与 v1（docker-compose.yml）的关键差异：
+#   1. 端口整体偏移（PG 5433 / 后端 8001 / 前端 5174），与 v1 栈并存不冲突；
+#   2. 新增 Redis（刷新轮换黑名单 / 登录失败限流 / 试算结果缓存的共享实现，
+#      不配置时各适配器自动降级进程内实现，功能不减、跨进程能力没有了）；
+#   3. 后端入口为六边形主包 ai_roi.main:app。
+#
+# 启动：docker compose -f docker-compose.v2.yml up -d
+# 初始化：见 README.md（alembic upgrade head + python -m scripts.seed）
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: airoi-v2-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: airoi
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-airoi_dev}
+      POSTGRES_DB: airoi
+    ports:
+      - "5433:5432"
+    volumes:
+      - airoi_v2_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airoi -d airoi"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: airoi-v2-redis
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: airoi-v2-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://airoi:airoi_dev@postgres:5432/airoi
+      JWT_SECRET: change-me-in-prod
+      ACCESS_TOKEN_EXPIRE_MINUTES: 1440
+      CORS_ORIGINS: '["http://localhost:5174"]'
+      REDIS_URL: redis://redis:6379/0
+      LOGIN_RATE_MAX_FAILURES: 5
+      LOGIN_RATE_WINDOW_SECONDS: 300
+    ports:
+      - "8001:8000"
+    command: uvicorn ai_roi.main:app --host 0.0.0.0 --port 8000
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE: http://localhost:8001
+    container_name: airoi-v2-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "5174:80"
+    # 生产构建由 nginx 托管静态资源（见 frontend/Dockerfile）
+
+volumes:
+  airoi_v2_pgdata:

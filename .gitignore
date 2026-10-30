@@ -1,0 +1,36 @@
+.venv/
+__pycache__/
+*.pyc
+*.db
+.env
+.env.local
+.env.*.local
+
+.DS_Store
+.vite/
+.vscode/
+.workbuddy/
+node_modules/
+dist/
+build/
+*.log
+.cache/
+coverage/
+.next/
+.turbo/
+instance/
+
+# Playwright e2e 测试产物
+frontend/test-results/
+frontend/playwright-report/
+frontend/playwright/.cache/
+
+# Redis 快照（在仓根启动 redis-server 时会落下）
+dump.rdb
+
+# TLS 证书与私钥（由 scripts/gen-self-signed-cert.sh 生成，放 C:/nginx/conf/certs）
+# 私钥一旦进 Git 就等于永久公开：历史无法真正删除，只能轮换。
+*.key
+*.crt
+*.pem
+*.pfx

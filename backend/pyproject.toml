@@ -1,0 +1,86 @@
+[project]
+name = "ai-roi-calculator-backend"
+version = "0.1.0"
+description = "AI 算力投资经济性测算平台 · FastAPI 后端（六边形架构：领域/应用/基础设施/接口）"
+requires-python = ">=3.14"
+authors = [{ name = "寇豆码 (Kou)", email = "kou@example.com" }]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+# src 布局：ai_roi 六边形主包（domain/application/infrastructure/interfaces/shared）
+where = ["src", "."]
+include = ["ai_roi*"]
+
+[tool.pytest.ini_options]
+# 计算引擎测试落在 src/ai_roi/domain/calc/__tests__/（契约冻结，随领域层迁移）
+testpaths = ["tests", "src/ai_roi/domain/calc/__tests__"]
+python_files = ["test_*.py"]
+asyncio_mode = "auto"
+filterwarnings = ["ignore::DeprecationWarning"]
+# src 布局：ai_roi 主包位于 src/
+pythonpath = ["src", "."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+# ---------------------------------------------------------------------------
+# 六边形架构契约（`make contract` / CI import-contracts 作业执行）
+# 依赖方向永远向内：interfaces → application → domain；shared 为叶子；
+# infrastructure 实现 application.ports，禁止反向依赖 interfaces。
+# ---------------------------------------------------------------------------
+[tool.importlinter]
+root_package = "ai_roi"
+# L5 需要分析外部包（fastapi/sqlalchemy/...）的 import 边
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "L1 领域层完全独立（不 import 任何其他 ai_roi 层）"
+type = "forbidden"
+source_modules = ["ai_roi.domain"]
+forbidden_modules = [
+    "ai_roi.application",
+    "ai_roi.infrastructure",
+    "ai_roi.interfaces",
+    "ai_roi.shared",
+]
+
+[[tool.importlinter.contracts]]
+name = "L2 应用层只依赖 domain/shared/自身端口（禁止依赖 interfaces）"
+type = "forbidden"
+source_modules = ["ai_roi.application"]
+forbidden_modules = ["ai_roi.interfaces"]
+
+[[tool.importlinter.contracts]]
+name = "L3 基础设施层不得依赖 interfaces（经 ports 协议被反向注入）"
+type = "forbidden"
+source_modules = ["ai_roi.infrastructure"]
+forbidden_modules = ["ai_roi.interfaces"]
+
+[[tool.importlinter.contracts]]
+name = "L4 共享内核是叶子（不得依赖任何业务层）"
+type = "forbidden"
+source_modules = ["ai_roi.shared"]
+forbidden_modules = [
+    "ai_roi.domain",
+    "ai_roi.application",
+    "ai_roi.infrastructure",
+    "ai_roi.interfaces",
+]
+
+[[tool.importlinter.contracts]]
+name = "L5 领域层不依赖第三方 Web/ORM 框架（纯度守护）"
+type = "forbidden"
+source_modules = ["ai_roi.domain"]
+forbidden_modules = [
+    "fastapi",
+    "sqlalchemy",
+    "pydantic",
+    "redis",
+    "openpyxl",
+    "uvicorn",
+    "starlette",
+]

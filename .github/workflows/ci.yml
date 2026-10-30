@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, redesign]
+  pull_request:
+
+jobs:
+  backend:
+    name: 后端（Python 3.14 · 六边形契约 · 真 PG 集成）
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: airoi
+          POSTGRES_PASSWORD: ${{ secrets.CI_POSTGRES_PASSWORD || 'airoi_dev' }}
+          POSTGRES_DB: airoi
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U airoi -d airoi"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://airoi:airoi_dev@localhost:5432/airoi
+      TEST_DATABASE_URL: postgresql+asyncpg://airoi:airoi_dev@localhost:5432/airoi
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: 安装后端依赖（requirements.txt，3.14 实测组合）
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # src 布局（backend/src/ai_roi）必须把项目本身装进环境，否则 alembic /
+      # lint-imports 这类**独立进程**找不到 ai_roi（pytest 靠 pyproject 里的
+      # pythonpath=["src"] 侥幸能 import，会掩盖这个问题 —— 实测 CI 首跑就死在
+      # alembic env.py 的 `from ai_roi.shared.config import settings`）。
+      # --no-deps：依赖已由 requirements.txt 钉版本装好，这里只做包注册，
+      # 若改成不带该参数的安装，pip 会重新解析依赖树，可能与钉死的版本打架。
+      - name: 安装项目本身（editable，注册 ai_roi 包）
+        working-directory: backend
+        run: pip install -e . --no-deps
+
+      - name: 数据库迁移（alembic upgrade head，从零可重复执行）
+        working-directory: backend
+        run: alembic upgrade head
+
+      - name: 六边形架构契约（import-linter L1–L5）
+        working-directory: backend
+        run: lint-imports
+
+      - name: 后端测试（pytest，含真 PG 集成/RLS 隔离）
+        working-directory: backend
+        # -rs 让「跳过」也进日志并带原因：本套件里 PG 集成测试会因「库不可达 /
+        # 未迁移 / 建受限角色失败」而整体 skip，不加 -rs 就只剩一句
+        # "6 skipped"，看日志的人无从判断集成测试到底有没有真跑。
+        run: pytest -q -rs
+
+  frontend:
+    name: 前端（Node 26.7 · tsc · 黄金向量一致性）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "26.7"
+
+      - name: 安装前端依赖（npm ci，lock 文件锁定）
+        working-directory: frontend
+        run: npm ci
+
+      - name: 类型检查（tsc --noEmit）
+        working-directory: frontend
+        run: npm run lint
+
+      - name: 前端测试（vitest，含前后端黄金向量 ≤0.1% 一致性）
+        working-directory: frontend
+        run: npm test

@@ -1,0 +1,564 @@
+"""公式规格（Formula Spec）—— 前后端唯一事实来源。
+
+用途：
+1. **可追溯**（PRD REQ-08，100% 指标可展开）：UI 的 ⓘ 抽屉直接渲染这里的公式与输入清单；
+2. **双端一致性**：前端 `calc-engine/formulaSpec.ts` 内容与本文件逐条对齐（id/表达式/单位）；
+3. **黄金向量**：`goldenVectors.json` 中每个断言指向一个 formula id 或 KPI key。
+
+⚠️ 修改公式必须同时修改两端并更新 `FORMULA_SPEC_VERSION` 与黄金向量。
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Dict, List
+
+from ai_roi.domain.calc.context import FORMULA_SPEC_VERSION
+
+GROUP_COST = "cost_chain"
+GROUP_REVENUE = "revenue"
+GROUP_BREAKEVEN = "breakeven"
+GROUP_FINANCE = "finance"
+GROUP_COMPARE = "compare"
+
+
+@dataclass(frozen=True)
+class FormulaDef:
+    """单条公式定义。"""
+
+    id: str
+    name: str
+    expr: str
+    inputs: List[str]
+    output: str
+    unit: str
+    group: str
+    note: str = ""
+
+
+FORMULAS: List[FormulaDef] = [
+    FormulaDef(
+        id="F001",
+        name="整机 CAPEX",
+        expr="CAPEX = N_gpu × P_gpu + P_aux",
+        inputs=["hw.N_gpu", "hw.P_gpu", "hw.P_aux"],
+        output="CAPEX",
+        unit="元",
+        group=GROUP_COST,
+    ),
+    FormulaDef(
+        id="F002",
+        name="整机功耗",
+        expr="P_sys = N_gpu × TDP / 1000 + P_aux_power",
+        inputs=["hw.N_gpu", "power.TDP", "power.P_aux_power"],
+        output="P_sys",
+        unit="kW/机",
+        group=GROUP_COST,
+        note="若填写 P_sys_override 则以人工覆盖值为准。",
+    ),
+    FormulaDef(
+        id="F003",
+        name="折旧月摊销（非现金）",
+        expr="Dep_m = CAPEX × (1 − S%) / (Y_dep × 12)",
+        inputs=["CAPEX", "hw.S_pct", "hw.Y_dep"],
+        output="Dep_m",
+        unit="元/月",
+        group=GROUP_COST,
+        note="折旧不进经营现金流，仅用于利润表与税盾（架构 §3.7）。",
+    ),
+    FormulaDef(
+        id="F004",
+        name="月固定现金成本",
+        expr="C_fix_cash = Co_loc + Co_net + Co_stor + Co_ops/12 + L_sw/12",
+        inputs=[
+            "power.Co_loc",
+            "power.Co_net",
+            "power.Co_stor",
+            "power.Co_ops",
+            "hw.L_sw",
+        ],
+        output="C_fix_cash",
+        unit="元/月",
+        group=GROUP_COST,
+    ),
+    FormulaDef(
+        id="F005",
+        name="月固定会计成本",
+        expr="C_fix_acct = Dep_m + C_fix_cash",
+        inputs=["Dep_m", "C_fix_cash"],
+        output="C_fix_acct",
+        unit="元/月",
+        group=GROUP_COST,
+    ),
+    FormulaDef(
+        id="F006",
+        name="每单位利用率月电费",
+        expr=(
+            "C_var_per_U = P_sys × PUE × E_price × H × (1−P_idle_ratio)；"
+            "待机固定 C_idle_m = P_sys × PUE × E_price × H × P_idle_ratio（H = 720 h/月，P2 负载曲线）"
+        ),
+        inputs=["P_sys", "power.PUE", "power.E_price", "power.P_idle_ratio"],
+        output="C_var_per_U",
+        unit="元/月",
+        group=GROUP_COST,
+    ),
+    FormulaDef(
+        id="F007",
+        name="满负荷月产能",
+        expr="Q_cap_M = T_eff × SEC / MTOK（SEC = 2,592,000 s/月）",
+        inputs=["perf.T_eff"],
+        output="Q_cap_M",
+        unit="Mtok/月",
+        group=GROUP_COST,
+    ),
+    FormulaDef(
+        id="F008",
+        name="月总成本（会计口径）",
+        expr="C_total(U) = C_fix_acct + C_var_per_U × U",
+        inputs=["C_fix_acct", "C_var_per_U", "demand.U"],
+        output="C_total",
+        unit="元/月",
+        group=GROUP_COST,
+    ),
+    FormulaDef(
+        id="F009",
+        name="每百万 token 成本（产能口径）",
+        expr="CostPerM(U) = C_total(U) / (Q_cap_M × U)",
+        inputs=["C_total", "Q_cap_M", "demand.U"],
+        output="cost_per_m_capacity",
+        unit="元/Mtok",
+        group=GROUP_COST,
+        note="主口径；另提供按实际需求摊薄的 C_total/D_eq 作为辅助口径。",
+    ),
+    FormulaDef(
+        id="F010",
+        name="等效折算系数 k",
+        expr="k = 实测 → T_dc / T_pf → 基准库 → 默认 0.1",
+        inputs=["perf.k_override", "perf.T_dc", "perf.T_pf", "perf.k_benchmark"],
+        output="k",
+        unit="无量纲",
+        group=GROUP_COST,
+    ),
+    FormulaDef(
+        id="F011",
+        name="折算因子",
+        expr="factor = 1 + k × rho × (1 − h)",
+        inputs=["k", "demand.rho", "demand.h"],
+        output="factor",
+        unit="无量纲",
+        group=GROUP_COST,
+    ),
+    FormulaDef(
+        id="F012",
+        name="输入/输出量拆分",
+        expr="D_out = D_eq / factor；D_in = rho × D_out",
+        inputs=["demand.D_eq", "factor", "demand.rho"],
+        output="D_out, D_in",
+        unit="Mtok/月",
+        group=GROUP_COST,
+    ),
+    FormulaDef(
+        id="F020",
+        name="月收入（修正量纲）",
+        expr="R = D_in × ((1−h) × p_in + h × p_cache) + D_out × p_out",
+        inputs=["D_in", "D_out", "demand.h", "pricing.p_in", "pricing.p_cache", "pricing.p_out"],
+        output="R",
+        unit="元/月",
+        group=GROUP_REVENUE,
+        note="已删除 PRD 原式误加的 /1e6：D 以百万 token 计、p 以元/百万 token 计，量纲自洽。",
+    ),
+    FormulaDef(
+        id="F021",
+        name="等效单价",
+        expr="p_eq = R / Q_eq",
+        inputs=["R", "Q_eq"],
+        output="p_eq",
+        unit="元/Mtok",
+        group=GROUP_REVENUE,
+    ),
+    FormulaDef(
+        id="F022",
+        name="月毛利与毛利率",
+        expr="G = R − C_total(U)；GM% = G / R",
+        inputs=["R", "C_total"],
+        output="G, GM_pct",
+        unit="元/月, 比率",
+        group=GROUP_REVENUE,
+    ),
+    FormulaDef(
+        id="F030",
+        name="单位贡献边际",
+        expr="M_U = p_eq × Q_cap_M − C_var_per_U",
+        inputs=["p_eq", "Q_cap_M", "C_var_per_U"],
+        output="M_U",
+        unit="元/月每单位U",
+        group=GROUP_BREAKEVEN,
+    ),
+    FormulaDef(
+        id="F031",
+        name="盈亏平衡利用率",
+        expr="U_be = C_fix_acct / M_U（M_U ≤ 0 则无解）",
+        inputs=["C_fix_acct", "M_U"],
+        output="U_be",
+        unit="比率",
+        group=GROUP_BREAKEVEN,
+    ),
+    FormulaDef(
+        id="F032",
+        name="盈亏平衡产量与售价",
+        expr="Q_be = Q_cap_M × U_be；p_be = (C_fix_acct + C_var_per_U × U) / (Q_cap_M × U)",
+        inputs=["Q_cap_M", "U_be", "C_fix_acct", "C_var_per_U", "demand.U"],
+        output="Q_be, p_be",
+        unit="Mtok/月, 元/Mtok",
+        group=GROUP_BREAKEVEN,
+    ),
+    FormulaDef(
+        id="F040",
+        name="期初投资与残值",
+        expr="I0 = CAPEX + 上线前费用；SV = CAPEX × S%",
+        inputs=["CAPEX", "hw.pre_launch_cost", "hw.S_pct"],
+        output="I0, SV",
+        unit="元",
+        group=GROUP_FINANCE,
+    ),
+    FormulaDef(
+        id="F041",
+        name="月折现率",
+        expr="r_m = (1 + r_w)^(1/12) − 1（非整数幂用 exp(ln(x)·y)）",
+        inputs=["finance.r_w"],
+        output="r_m",
+        unit="比率/月",
+        group=GROUP_FINANCE,
+    ),
+    FormulaDef(
+        id="F042",
+        name="月经营净现金流",
+        expr="CF_t = R_t − OPEX_cash_t − Tax_t（+ 期末 SV），折旧不计入",
+        inputs=["R", "C_fix_cash", "C_var_per_U", "demand.U", "finance.Tax", "SV"],
+        output="CF_t",
+        unit="元/月",
+        group=GROUP_FINANCE,
+    ),
+    FormulaDef(
+        id="F043",
+        name="净现值",
+        expr="NPV = −I0 + Σ CF_t / (1 + r_m)^t",
+        inputs=["I0", "CF_t", "r_m"],
+        output="npv",
+        unit="元",
+        group=GROUP_FINANCE,
+    ),
+    FormulaDef(
+        id="F044",
+        name="全周期总成本",
+        expr="TCO = CAPEX + Σ OPEX_cash_t",
+        inputs=["CAPEX", "OPEX_cash_t"],
+        output="tco",
+        unit="元",
+        group=GROUP_FINANCE,
+        note="税费为利润相关支出，不计入 TCO；折旧不重复计入。",
+    ),
+    FormulaDef(
+        id="F045",
+        name="投资回报率",
+        expr="ROI = (Σ CF_t − I0) / I0",
+        inputs=["CF_t", "I0"],
+        output="roi",
+        unit="比率",
+        group=GROUP_FINANCE,
+    ),
+    FormulaDef(
+        id="F046",
+        name="内部收益率",
+        expr="求 r_m 使 NPV = 0；年化 IRR = (1 + r_m)^12 − 1",
+        inputs=["CF_t", "I0"],
+        output="irr",
+        unit="比率/年",
+        group=GROUP_FINANCE,
+        note="二分 + 牛顿；无变号→无解；多解→采纳 MIRR 并标注。",
+    ),
+    FormulaDef(
+        id="F047",
+        name="回本周期",
+        expr="静态：累计 CF 首次 ≥ I0；折现：累计折现 CF 首次 ≥ I0（线性插值到小数月）",
+        inputs=["CF_t", "I0", "r_m"],
+        output="payback_static, payback_discounted",
+        unit="月",
+        group=GROUP_FINANCE,
+    ),
+    FormulaDef(
+        id="F050",
+        name="统一线性成本模型",
+        expr="C(Q) = a + b × Q",
+        inputs=["a", "b", "Q"],
+        output="C(Q)",
+        unit="元/月",
+        group=GROUP_COMPARE,
+    ),
+    FormulaDef(
+        id="F051",
+        name="方案A 自建系数",
+        expr="a_A = C_fix_acct；b_A = C_var_per_U / Q_cap_M",
+        inputs=["C_fix_acct", "C_var_per_U", "Q_cap_M"],
+        output="a_A, b_A",
+        unit="元/月, 元/Mtok",
+        group=GROUP_COMPARE,
+    ),
+    FormulaDef(
+        id="F052",
+        name="方案B 租用系数",
+        expr="a_B = 包月固定 + 自付托管/网络/存储/运维；b_B = Rent_gpu × N_gpu × H / Q_cap_M",
+        inputs=["pricing.Rent_gpu", "hw.N_gpu", "Q_cap_M", "pricing.rent_inc"],
+        output="a_B, b_B",
+        unit="元/月, 元/Mtok",
+        group=GROUP_COMPARE,
+    ),
+    FormulaDef(
+        id="F053",
+        name="方案C API 系数",
+        expr="a_C = 0；b_C = (rho × ((1−h) × API_in + h × API_cache) + API_out) / factor",
+        inputs=["pricing.API_in", "pricing.API_out", "pricing.API_cache", "demand.rho", "demand.h", "factor"],
+        output="a_C, b_C",
+        unit="元/月, 元/Mtok",
+        group=GROUP_COMPARE,
+    ),
+    FormulaDef(
+        id="F054",
+        name="临界规模",
+        expr="Q_XY = (a_X − a_Y) / (b_Y − b_X)",
+        inputs=["a_X", "a_Y", "b_X", "b_Y"],
+        output="Q_XY",
+        unit="Mtok/月",
+        group=GROUP_COMPARE,
+        note="平行线无解；Q<0 表示全区间单向占优；仅下包络活跃转折点作为推荐分界。",
+    ),
+    FormulaDef(
+        id="F060",
+        name="敏感性摆幅",
+        expr="swing = |target(x×(1+Δ)) − target(x×(1−Δ))|，按 swing 降序",
+        inputs=["target", "delta"],
+        output="swing",
+        unit="同目标指标",
+        group=GROUP_COMPARE,
+    ),
+    FormulaDef(
+        id="F061",
+        name="加权月电价（分时 TOU）",
+        expr="weighted = e_price_valley·w_valley + e_price_flat·w_flat + e_price_peak·w_peak（w_flat=1−w_peak−w_valley）",
+        inputs=["power.e_price_valley", "power.e_price_flat", "power.e_price_peak", "power.tou_valley_share", "power.tou_peak_share"],
+        output="weighted_e_price",
+        unit="元/kWh",
+        group=GROUP_COST,
+        note="各档=E_price、峰谷占比=0 ⇒ weighted=E_price，退化为现状。",
+    ),
+    FormulaDef(
+        id="F062",
+        name="融资结构（债务杠杆）",
+        expr="debt=I0·r；equity=I0·(1−r)；interest_t=bal·rate/12；principal_t=debt/L（直线摊销）",
+        inputs=["I0", "finance.debt_ratio", "finance.debt_rate", "finance.loan_term_months"],
+        output="debt,equity,interest_t,principal_t",
+        unit="元",
+        group=GROUP_FINANCE,
+        note="debt_ratio=0 ⇒ 无融资，权益 CF = 现状 CF；不影响 C(Q)/U_be。",
+    ),
+    FormulaDef(
+        id="F063",
+        name="权益现金流与杠杆指标",
+        expr="equity_cf_0=−equity；equity_cf_t=R−OPEX−int−prin−tax；资产负债率=debt/I0；利息覆盖=EBIT/int；ROE=Σeq_cf/equity",
+        inputs=["equity", "R", "OPEX_cash", "interest_t", "principal_t", "tax_t", "EBIT_t"],
+        output="资产负债率,利息覆盖倍数,ROE,杠杆NPV,杠杆IRR",
+        unit="比率/元",
+        group=GROUP_FINANCE,
+        note="杠杆后 NPV/IRR 即默认 npv/irr 在 debt_ratio>0 时的值；debt_ratio=0 退化为现状。",
+    ),
+    FormulaDef(
+        id="F064",
+        name="需求逐年增长",
+        expr="D_t = D·(1+g_demand)^floor((t−1)/12)；R_t ∝ D_t；C_var_t ∝ D_t",
+        inputs=["D", "demand.g_demand", "t"],
+        output="D_t,revenue_t,opex_cash_t",
+        unit="Mtok/月,元/月",
+        group=GROUP_REVENUE,
+        note="g_demand=0 ⇒ 恒量需求，退化为现状；crossover 推荐基于初始 D。",
+    ),
+    FormulaDef(
+        id="F065",
+        name="多因素联合敏感性",
+        expr="全因子网格 2^N → NPV 联合 min/max/分位数；S_i=|E[NPV|x_i=hi]−E[NPV|x_i=lo]|；I_ij=NPV(hi,hi)−NPV(hi,lo)−NPV(lo,hi)+NPV(lo,lo)",
+        inputs=["target", "delta", "vars"],
+        output="joint_min, joint_max, percentiles, S_i, I_ij",
+        unit="同目标指标",
+        group=GROUP_COMPARE,
+        note="确定性多因素边界与方差分解，非随机，与蒙特卡洛严格区分。",
+    ),
+    FormulaDef(
+        id="F066",
+        name="自定义情景集",
+        expr="任意 K 组参数覆盖 → evaluate_kpis 并列",
+        inputs=["specs", "overrides"],
+        output="custom_scenarios.cases[].kpis",
+        unit="同 KPI",
+        group=GROUP_COMPARE,
+        note="突破保守/基准/乐观三档，K 任意；复用 evaluate_kpis。",
+    ),
+    FormulaDef(
+        id="F093",
+        name="机柜数（电力运维口径）",
+        expr="racks = max(显式 racks, ceil(N_gpu / RACK_CARDS_PER_NODE))",
+        inputs=["hw.N_gpu", "power.racks"],
+        output="racks",
+        unit="柜",
+        group=GROUP_COST,
+        note="柜电分离/包柜包电共用；包柜包电时按此计机柜数。",
+    ),
+    FormulaDef(
+        id="F094",
+        name="包柜包电月成本",
+        expr="bundle_rack_cost_m = bundle_monthly_per_rack × racks（包柜包电模式）；柜电分离=0",
+        inputs=["power.bundle_monthly_per_rack", "power.racks"],
+        output="bundle_rack_cost_m",
+        unit="元/月",
+        group=GROUP_COST,
+        note="包柜包电模式：机柜+电费一口价，Co_loc 与按功耗核算的电费（idle+可变）剔除。",
+    ),
+    FormulaDef(
+        id="F100",
+        name="单卡有效吞吐估算",
+        expr="T_card = REF_T_DC × perf_index × quant_mult × sla_scale",
+        inputs=["perf_index", "quant", "SLA_ttft", "SLA_tpot"],
+        output="T_card",
+        unit="tok/s",
+        group=GROUP_COMPARE,
+        note=(
+            "REF_T_DC=2000（H800/FP8 基准）；quant_mult 复用 QUANT_THROUGHPUT_MULT；"
+            "sla_scale 复用 available_batch_limit 收缩比例（硬件反选，与正向吞吐同源）。"
+        ),
+    ),
+    FormulaDef(
+        id="F101",
+        name="权重显存需求估算",
+        expr="Mem_w ≈ M_param × bytes_per_param(quant) × 1.15",
+        inputs=["M_param", "quant", "Mem_w_override"],
+        output="Mem_w",
+        unit="GB",
+        group=GROUP_COMPARE,
+        note="启发式估算（KV cache/框架开销系数 1.15），可被 Mem_w_override 覆盖，不进黄金向量主链。",
+    ),
+    FormulaDef(
+        id="F071",
+        name="每卡每天收入",
+        expr="R / (N_gpu × 30)",
+        inputs=["R", "hw.N_gpu"],
+        output="rev_per_gpu_day",
+        unit="元/卡/天",
+        group=GROUP_REVENUE,
+        note="管理驾驶舱单卡效能指标；分母为自然月 30 天（与 H=720 常量同源）。",
+    ),
+    FormulaDef(
+        id="F072",
+        name="每卡每天成本(全)",
+        expr="C_total / (N_gpu × 30)",
+        inputs=["C_total", "hw.N_gpu"],
+        output="cost_per_gpu_day",
+        unit="元/卡/天",
+        group=GROUP_COST,
+        note="全成本口径（含折旧与固定成本摊销），与 F071 配对解读单卡经济性。",
+    ),
+    FormulaDef(
+        id="F073",
+        name="每度电产出 Token",
+        expr="Q_out_M × 10^6 / (P_eff(U) × PUE × 720)；P_eff(U)=P_sys·(P_idle_ratio + U·(1−P_idle_ratio))",
+        inputs=["Q_out_M", "P_sys", "power.PUE", "demand.U", "power.P_idle_ratio"],
+        output="token_per_kwh",
+        unit="Token/度",
+        group=GROUP_COST,
+        note="能效指标；待机功耗计入分母（P2 负载曲线），月耗电 = P_eff×PUE×720h。",
+    ),
+    FormulaDef(
+        id="F081",
+        name="SLA 赔偿计提",
+        expr="月计提 = R × SLA_penalty_rate；全周期 = Σ_t R_t × SLA_penalty_rate",
+        inputs=["R", "perf.SLA_penalty_rate"],
+        output="sla_provision_monthly, sla_provision_total",
+        unit="元/月,元",
+        group=GROUP_REVENUE,
+        note="P1 SLA 风险拨备，计入现金流 opex_cash（真金白银），影响 EBIT/税/NPV/IRR。",
+    ),
+    FormulaDef(
+        id="F082",
+        name="资源包递延收入链路",
+        expr=(
+            "合同负债(初始)=pkg_prepaid；每月确认=pkg_prepaid/pkg_consume_months；"
+            "期末合同负债=pkg_prepaid×max(0, 1−T_horizon/pkg_consume_months)；"
+            "未确认占比=同期末比例；现金跑道=pkg_prepaid/R"
+        ),
+        inputs=[
+            "pricing.pkg_prepaid",
+            "pricing.pkg_consume_months",
+            "pricing.pkg_tokens",
+            "finance.T_horizon",
+            "R",
+        ],
+        output="deferred_revenue, rev_recognized_monthly, deferred_revenue_end, unearned_share, cash_prepaid, monthly_consumption, prepaid_cash_months",
+        unit="元,元/月,元,比率,元,Mtok/月,月",
+        group=GROUP_REVENUE,
+        note="P1 报告型字段：不改写核心现金流，仅量化预收费→消耗→确认链路。",
+    ),
+    FormulaDef(
+        id="F091",
+        name="待机功耗固定成本(月)",
+        expr="C_power_idle_m = P_sys × PUE × weighted_e_price × 720 × P_idle_ratio（包柜包电=0）",
+        inputs=["P_sys", "power.PUE", "weighted_e_price", "power.P_idle_ratio"],
+        output="C_power_idle_m",
+        unit="元/月",
+        group=GROUP_COST,
+        note="P2 负载曲线：idle floor 固定功耗成本；P_idle_ratio=0 时退化为 0（零回归）。",
+    ),
+    FormulaDef(
+        id="F092",
+        name="学习曲线期末系数",
+        expr="(1 − cost_learning_rate)^(T_horizon/12)",
+        inputs=["finance.cost_learning_rate", "finance.T_horizon"],
+        output="learning_terminal_factor",
+        unit="比率",
+        group=GROUP_COST,
+        note="P2 学习曲线：单位可变成本随时间缩放因子的期末值；rate=0 时为 1（零回归）。",
+    ),
+]
+
+FORMULA_INDEX: Dict[str, FormulaDef] = {item.id: item for item in FORMULAS}
+
+
+@dataclass(frozen=True)
+class FormulaSpec:
+    """公式规格集合（对外暴露给 API/前端）。"""
+
+    version: str = FORMULA_SPEC_VERSION
+    formulas: List[FormulaDef] = field(default_factory=lambda: list(FORMULAS))
+
+
+def get_formula(formula_id: str) -> FormulaDef:
+    """按 id 取公式定义。"""
+    if formula_id not in FORMULA_INDEX:
+        raise KeyError(f"未知公式 id：{formula_id}")
+    return FORMULA_INDEX[formula_id]
+
+
+def spec_as_dict() -> Dict[str, object]:
+    """导出为可 JSON 化结构。"""
+    return {
+        "version": FORMULA_SPEC_VERSION,
+        "formulas": [
+            {
+                "id": item.id,
+                "name": item.name,
+                "expr": item.expr,
+                "inputs": item.inputs,
+                "output": item.output,
+                "unit": item.unit,
+                "group": item.group,
+                "note": item.note,
+            }
+            for item in FORMULAS
+        ],
+    }

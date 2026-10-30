@@ -1,0 +1,31 @@
+.home {
+  padding: 48rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.hero {
+  margin: 120rpx 0 64rpx;
+  text-align: center;
+}
+.title {
+  font-size: 42rpx;
+  font-weight: 600;
+  display: block;
+  color: #001529;
+}
+.sub {
+  font-size: 26rpx;
+  color: #888;
+  margin-top: 16rpx;
+  display: block;
+}
+.enter {
+  width: 70%;
+  margin-top: 40rpx;
+}
+.tip {
+  font-size: 22rpx;
+  color: #aaa;
+  margin-top: 24rpx;
+}

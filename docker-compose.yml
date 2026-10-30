@@ -1,0 +1,59 @@
+# AI 算力投资 ROI 测算平台 —— 本地一键编排（PG16 + 后端 + 前端）。
+# 仅用于本地开发 / 演示；生产请替换为托管 PG 与反向代理。
+#
+# 启动：docker compose up -d
+# 初始化：见 README.md（建表迁移 + 种子数据）
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: airoi-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: airoi
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-airoi_dev}
+      POSTGRES_DB: airoi
+    ports:
+      - "5432:5432"
+    volumes:
+      - airoi_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airoi -d airoi"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: airoi-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://airoi:airoi_dev@postgres:5432/airoi
+      JWT_SECRET: change-me-in-prod
+      ACCESS_TOKEN_EXPIRE_MINUTES: 1440
+      CORS_ORIGINS: '["http://localhost:5173"]'
+    ports:
+      - "8000:8000"
+    command: uvicorn ai_roi.main:app --host 0.0.0.0 --port 8000
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: airoi-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      VITE_API_BASE: http://localhost:8000
+    ports:
+      - "5173:80"
+    # 生产构建由 nginx 托管静态资源（见 frontend/Dockerfile）
+
+volumes:
+  airoi_pgdata:

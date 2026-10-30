@@ -1,0 +1,8 @@
+<view class="home">
+  <view class="hero">
+    <text class="title">AI 算力投资 ROI 测算</text>
+    <text class="sub">随时随地测算算力成本与回报</text>
+  </view>
+  <button class="enter" type="primary" bindtap="enter">进入测算平台</button>
+  <view class="tip">首次进入需联网加载 H5 页面</view>
+</view>

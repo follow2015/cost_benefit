@@ -1,0 +1,2 @@
+<!-- web-view 承载 H5：URL 必须已在微信公众平台「业务域名」中配置并校验 -->
+<web-view src="{{url}}"></web-view>
